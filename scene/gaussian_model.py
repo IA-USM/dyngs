@@ -21,6 +21,8 @@ from simple_knn._C import distCUDA2
 from utils.graphics_utils import BasicPointCloud
 from utils.general_utils import strip_symmetric, build_scaling_rotation
 
+from pointcloud_matcher import PointMatcher
+
 class GaussianModel:
 
     def setup_functions(self):
@@ -145,6 +147,33 @@ class GaussianModel:
         self._rotation = nn.Parameter(rots.requires_grad_(True))
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
+    
+    def create_from_previous_gaussians(self, pcd, prev_gaussians, spatial_lr_scale : float, bounds=None):
+        
+        self.spatial_lr_scale = spatial_lr_scale
+        
+        self.pc_matcher = PointMatcher()
+        
+        bounds_min, bounds_max = bounds
+        prev_xyz = prev_gaussians.get_xyz
+        inside_mask = torch.logical_and(torch.all(prev_xyz > bounds_min, dim=1), torch.all(prev_xyz < bounds_max, dim=1))
+        
+        prev_xyz = prev_xyz[inside_mask]
+        cur_xyz = torch.tensor(np.asarray(pcd.points)).float().cuda()
+
+        transformed_xyz = self.pc_matcher.match(prev_xyz, cur_xyz)
+
+        new_xyz = prev_xyz.clone()
+        new_xyz[inside_mask] = transformed_xyz
+
+        self._xyz = nn.Parameter(new_xyz.requires_grad_(True))
+        self._features_dc = prev_gaussians._features_dc.clone().requires_grad_(True)
+        self._features_rest = prev_gaussians._features_rest.clone().requires_grad_(True)
+        self._scaling = prev_gaussians._scaling.clone().requires_grad_(True)
+        self._rotation = prev_gaussians._rotation.clone().requires_grad_(True)
+        self._opacity = prev_gaussians._opacity.clone().requires_grad_(True)
+        self.max_radii2D = torch.zeros((self._xyz.shape[0]), device="cuda")
+
 
     def training_setup(self, training_args):
         self.percent_dense = training_args.percent_dense

@@ -23,7 +23,7 @@ class Scene:
     gaussians : GaussianModel
 
     def __init__(self, args : ModelParams, gaussians : GaussianModel, load_iteration=None, 
-                 shuffle=True, resolution_scales=[1.0], frame_idx=1, prev_gaussians=None):
+                 shuffle=True, resolution_scales=[1.0], frame_idx=1, prev_gaussians=None, bounds=None):
         """b
         :param path: Path to colmap scene main folder.
         """
@@ -87,8 +87,7 @@ class Scene:
             if frame_idx == 1:
                 self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
             else:
-                # TODO: Implement
-                self.gaussians.create_from_previous_gaussians(scene_info.point_cloud, self.cameras_extent, prev_gaussians)
+                self.gaussians.create_from_previous_gaussians(scene_info.point_cloud, prev_gaussians, self.cameras_extent, bounds=bounds)
 
     def save(self, iteration):
         point_cloud_path = os.path.join(self.model_path, "frame_"+ str(self.frame_idx), "point_cloud/iteration_{}".format(iteration))
