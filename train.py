@@ -34,6 +34,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     tb_writer = prepare_output_and_logger(dataset)
     gaussians = GaussianModel(dataset.sh_degree)
 
+    # Hardcode bounds where there will be movement
+    bounds =  (torch.tensor([-20, -8, -9]).cuda(), torch.tensor([20, 6, 17]).cuda())
+
     prev_gaussians = None
     if frame_idx > 1:
         prev_gaussians = GaussianModel(dataset.sh_degree)
@@ -43,7 +46,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                                         "iteration_" + str(loaded_iter),
                                         "point_cloud.ply"))
 
-    scene = Scene(dataset, gaussians, frame_idx=frame_idx, prev_gaussians=prev_gaussians)
+    scene = Scene(dataset, gaussians, frame_idx=frame_idx, prev_gaussians=prev_gaussians, bounds = bounds)
 
     gaussians.training_setup(opt)
     if checkpoint:
@@ -145,7 +148,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
-def prepare_output_and_logger(args):    
+def prepare_output_and_logger(args):
     if not args.model_path:
         if os.getenv('OAR_JOB_ID'):
             unique_str=os.getenv('OAR_JOB_ID')
