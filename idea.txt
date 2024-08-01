@@ -1,0 +1,17 @@
+Train a dynamic gaussian splat frame by frame
+
+-- Base idea --
+First frame:
+- Read first frame dataset only
+- Train a vanilla 3dgs
+- Save ply
+
+For the rest:
+- Load previous ply
+- Load current dataset
+- Deform previous ply to current dataset points (scene.py -> gaussian_model.py)
+- Train for fewer iterations
+
+-- Extensions --
+- Optical flow loss
+- Temporal coherence loss
