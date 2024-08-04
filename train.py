@@ -29,6 +29,8 @@ try:
 except ImportError:
     TENSORBOARD_FOUND = False
 
+import torchvision
+
 def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoint_iterations, checkpoint, debug_from, frame_idx):
     first_iter = 0
     tb_writer = prepare_output_and_logger(dataset)
@@ -40,11 +42,19 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     prev_gaussians = None
     if frame_idx > 1:
         prev_gaussians = GaussianModel(dataset.sh_degree)
-        loaded_iter = searchForMaxIteration(os.path.join(dataset.model_path + f"_{frame_idx-1}", "point_cloud"))
-        prev_gaussians.load_ply(os.path.join(dataset.model_path + f"_{frame_idx-1}",
+        loaded_iter = searchForMaxIteration(os.path.join(dataset.model_path,  f"frame_{frame_idx-1}", "point_cloud"))
+        prev_gaussians.load_ply(os.path.join(dataset.model_path,  f"frame_{frame_idx-1}",
                                         "point_cloud",
                                         "iteration_" + str(loaded_iter),
                                         "point_cloud.ply"))
+        iters = opt.frame_iterations
+        opt.densify_from_iter = 0
+        opt.densification_interval = 500
+        saving_iterations += [iters]
+        testing_iterations += [iters]
+        opt.densify_grad_threshold = 0.0007
+    else:
+        iters = opt.iterations
 
     scene = Scene(dataset, gaussians, frame_idx=frame_idx, prev_gaussians=prev_gaussians, bounds = bounds)
 
@@ -61,9 +71,9 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
     viewpoint_stack = None
     ema_loss_for_log = 0.0
-    progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
+    progress_bar = tqdm(range(first_iter, iters), desc="Training progress")
     first_iter += 1
-    for iteration in range(first_iter, opt.iterations + 1):        
+    for iteration in range(first_iter, iters + 1):        
         if network_gui.conn == None:
             network_gui.try_connect()
         while network_gui.conn != None:
@@ -74,7 +84,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                     net_image = render(custom_cam, gaussians, pipe, background, scaling_modifer)["render"]
                     net_image_bytes = memoryview((torch.clamp(net_image, min=0, max=1.0) * 255).byte().permute(1, 2, 0).contiguous().cpu().numpy())
                 network_gui.send(net_image_bytes, dataset.source_path)
-                if do_training and ((iteration < int(opt.iterations)) or not keep_alive):
+                if do_training and ((iteration < int(iters)) or not keep_alive):
                     break
             except Exception as e:
                 network_gui.conn = None
@@ -109,13 +119,18 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
 
         iter_end.record()
 
+        # Debug renders
+        if (iteration == 1):
+            torchvision.utils.save_image(image, f"debug/starting_point_frame_{frame_idx}.png")
+            torchvision.utils.save_image(gt_image, f"debug/gt_frame_{frame_idx}.png")
+
         with torch.no_grad():
             # Progress bar
             ema_loss_for_log = 0.4 * loss.item() + 0.6 * ema_loss_for_log
             if iteration % 10 == 0:
                 progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f} Point count: {scene.gaussians.get_xyz.shape[0]}"})
                 progress_bar.update(10)
-            if iteration == opt.iterations:
+            if iteration == iters:
                 progress_bar.close()
 
             # Log and save
@@ -124,28 +139,36 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
                 mem = torch.cuda.max_memory_allocated() / 1024**3
                 print(f"Max memory used: {mem:.2f} GB")
+                torchvision.utils.save_image(image, f"debug/frame_{frame_idx}.png")
                 scene.save(iteration)
 
+            
+            
             # Densification
             if iteration < opt.densify_until_iter:
                 # Keep track of max radii in image-space for pruning
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                 gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter, image.shape[2], image.shape[1])
 
+                #if iteration == 1 and frame_idx != 1:
+                    # initial top k pruning
+                    #gaussians.top_k_prune(0.8)
+
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    gaussians.densify_and_prune(opt.densify_grad_threshold, 0.005, scene.cameras_extent, size_threshold)
+                    gaussians.densify_and_prune(opt.densify_grad_threshold, 0.01, scene.cameras_extent, size_threshold)
                 
                 if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
                     gaussians.reset_opacity()
 
             # Optimizer step
-            if iteration < opt.iterations:
+            if iteration < iters:
                 gaussians.optimizer.step()
                 gaussians.optimizer.zero_grad(set_to_none = True)
 
             if (iteration in checkpoint_iterations):
                 print("\n[ITER {}] Saving Checkpoint".format(iteration))
+                torchvision.utils.save_image(image, f"debug/frame_{frame_idx}.png")
                 torch.save((gaussians.capture(), iteration), scene.model_path + "/chkpnt" + str(iteration) + ".pth")
 
 def prepare_output_and_logger(args):
@@ -227,6 +250,8 @@ if __name__ == "__main__":
     args.save_iterations.append(args.iterations)
     
     print("Optimizing " + args.model_path)
+
+    os.makedirs("debug", exist_ok=True)
 
     # Initialize system state (RNG)
     safe_state(args.quiet)

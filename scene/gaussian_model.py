@@ -148,31 +148,48 @@ class GaussianModel:
         self._opacity = nn.Parameter(opacities.requires_grad_(True))
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
     
-    def create_from_previous_gaussians(self, pcd, prev_gaussians, spatial_lr_scale : float, bounds=None):
+    def create_from_previous_gaussians(self, pcd, prev_pcd, prev_gaussians, spatial_lr_scale : float, bounds=None):
         
         self.spatial_lr_scale = spatial_lr_scale
         
         self.pc_matcher = PointMatcher()
         
         bounds_min, bounds_max = bounds
-        prev_xyz = prev_gaussians.get_xyz
-        inside_mask = torch.logical_and(torch.all(prev_xyz > bounds_min, dim=1), torch.all(prev_xyz < bounds_max, dim=1))
+
+        # Gaussians inside bounds
+        prev_gaussians_xyz = prev_gaussians.get_xyz
+        prev_gaussians_inside_mask = torch.logical_and(torch.all(prev_gaussians_xyz > bounds_min, dim=1), torch.all(prev_gaussians_xyz < bounds_max, dim=1))
         
-        prev_xyz = prev_xyz[inside_mask]
+        # Prev points inside bounds
+        prev_xyz = torch.tensor(np.asarray(prev_pcd.points)).float().cuda()
+        prev_inside_mask = torch.logical_and(torch.all(prev_xyz > bounds_min, dim=1), torch.all(prev_xyz < bounds_max, dim=1))
+
+        # Current points inside bounds
         cur_xyz = torch.tensor(np.asarray(pcd.points)).float().cuda()
+        cur_inside_mask = torch.logical_and(torch.all(cur_xyz > bounds_min, dim=1), torch.all(cur_xyz < bounds_max, dim=1))
 
-        transformed_xyz = self.pc_matcher.match(prev_xyz, cur_xyz)
+        # Estimate the deformation from pc1 -> pc2 and apply it to the previous gaussians
+        print("Warping the previous gaussians to the current point cloud ...")
+        transformed_xyz = self.pc_matcher.match(prev_xyz[prev_inside_mask].detach().cpu().numpy(), 
+                                                cur_xyz[cur_inside_mask].detach().cpu().numpy(),
+                                                warp_override=prev_gaussians_xyz,
+                                                same_world=True)
 
-        new_xyz = prev_xyz.clone()
-        new_xyz[inside_mask] = transformed_xyz
-
+        # Leave the points outside the bounds as they were
+        new_xyz = torch.from_numpy(transformed_xyz).float().cuda()
+        new_xyz[~prev_gaussians_inside_mask] = prev_gaussians_xyz[~prev_gaussians_inside_mask]
+        
         self._xyz = nn.Parameter(new_xyz.requires_grad_(True))
-        self._features_dc = prev_gaussians._features_dc.clone().requires_grad_(True)
-        self._features_rest = prev_gaussians._features_rest.clone().requires_grad_(True)
-        self._scaling = prev_gaussians._scaling.clone().requires_grad_(True)
-        self._rotation = prev_gaussians._rotation.clone().requires_grad_(True)
-        self._opacity = prev_gaussians._opacity.clone().requires_grad_(True)
+        self._features_dc = nn.Parameter(prev_gaussians._features_dc.clone().requires_grad_(True))
+        self._features_rest = nn.Parameter(prev_gaussians._features_rest.clone().requires_grad_(True))
+        self._scaling = nn.Parameter(prev_gaussians._scaling.clone().requires_grad_(True))
+        self._rotation = nn.Parameter(prev_gaussians._rotation.clone().requires_grad_(True))
+        self._opacity = nn.Parameter(prev_gaussians._opacity.clone().requires_grad_(True))
+        
         self.max_radii2D = torch.zeros((self._xyz.shape[0]), device="cuda")
+
+        del self.pc_matcher
+        del prev_gaussians
 
 
     def training_setup(self, training_args):
@@ -430,6 +447,13 @@ class GaussianModel:
         self.prune_points(prune_mask)
 
         torch.cuda.empty_cache()
+    
+    def top_k_prune(self, percent):
+        k = int(percent * self.get_xyz.shape[0])
+        _, indices = torch.topk(self.get_opacity.squeeze(), k)
+        prune_mask = torch.ones_like(self.get_opacity, dtype=bool)
+        prune_mask[indices] = False
+        self.prune_points(prune_mask.squeeze())
 
     def add_densification_stats(self, viewspace_point_tensor, update_filter, width, height):
         grad = viewspace_point_tensor.grad.squeeze(0) # [N, 2]

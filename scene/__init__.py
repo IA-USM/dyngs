@@ -13,7 +13,7 @@ import os
 import random
 import json
 from utils.system_utils import searchForMaxIteration
-from scene.dataset_readers import sceneLoadTypeCallbacks
+from scene.dataset_readers import sceneLoadTypeCallbacks, fetchPly
 from scene.gaussian_model import GaussianModel
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
@@ -87,7 +87,10 @@ class Scene:
             if frame_idx == 1:
                 self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
             else:
-                self.gaussians.create_from_previous_gaussians(scene_info.point_cloud, prev_gaussians, self.cameras_extent, bounds=bounds)
+                prev_ply_path = os.path.join(args.source_path,f"colmap_{frame_idx-1}" , "sparse/0/points3D.ply")
+                prev_pcd = fetchPly(prev_ply_path)
+                
+                self.gaussians.create_from_previous_gaussians(scene_info.point_cloud, prev_pcd, prev_gaussians, self.cameras_extent, bounds=bounds)
 
     def save(self, iteration):
         point_cloud_path = os.path.join(self.model_path, "frame_"+ str(self.frame_idx), "point_cloud/iteration_{}".format(iteration))

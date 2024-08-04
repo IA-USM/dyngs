@@ -18,7 +18,7 @@ from DeformationPyramid.model.loss import compute_truncated_chamfer_distance
 
 from easydict import EasyDict as edict
 
-from scene.dataset_readers import fetchPly
+#from scene.dataset_readers import fetchPly
 
 
 
@@ -68,7 +68,7 @@ class PointMatcher:
                               motion=self.config.motion_type)
 
     
-    def match(self, source, target):
+    def match(self, source, target, warp_override=None, same_world = False):
         
         assert source.shape[0] > self.config.samples, "Source point cloud must have more points than the number of samples"
         assert target.shape[0] > self.config.samples, "Target point cloud must have more points than the number of samples"
@@ -80,14 +80,26 @@ class PointMatcher:
         source_sample = source[source_sample_idx]
         target_sample = target[target_sample_idx]
 
-        # To device
-        source, target, source_sample, target_sample = map( lambda x: torch.from_numpy(x).to(self.config.device).float(), [source, target, source_sample, target_sample] )
+        as_numpy = type(source) == np.ndarray
 
+        # To device
+        if (as_numpy):
+            source, target, source_sample, target_sample = map( lambda x: torch.from_numpy(x).to(self.config.device).float(), [source, target, source_sample, target_sample] )
+        else:
+            source, target, source_sample, target_sample = map( lambda x: x.to(self.config.device).float(), [source, target, source_sample, target_sample] )
+        
         # Cancel global translation
         src_mean = source_sample.mean(dim=0, keepdims=True)
-        tgt_mean = target_sample.mean(dim=0, keepdims=True)
+
+        if same_world:
+            tgt_mean = src_mean
+        else:
+            tgt_mean = target_sample.mean(dim=0, keepdims=True)
+        
         source_sample = source_sample - src_mean
         target_sample = target_sample - tgt_mean
+        if (warp_override is not None):
+            warp_override = warp_override - src_mean
 
         s_sample = source_sample
         t_sample = target_sample
@@ -138,11 +150,16 @@ class PointMatcher:
         # Warp original point cloud
         self.NDP.gradient_setup(optimized_level=-1)
         source = source - src_mean
-        warped_points, data = self.NDP.warp(source)
-        warped_points = warped_points.detach().cpu().numpy()
+        if warp_override is not None:
+            warped_points, data = self.NDP.warp(warp_override)
+        else:
+            warped_points, data = self.NDP.warp(source)
 
-        return warped_points + tgt_mean[0].cpu().numpy()
-    
+        if (as_numpy):
+            warped_points = warped_points.detach().cpu().numpy()
+            return warped_points + tgt_mean[0].cpu().numpy()
+        else:
+            return warped_points + tgt_mean[0]
 
 if __name__ == "__main__":
     matcher = PointMatcher()
