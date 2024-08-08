@@ -1,1 +1,1 @@
-Namespace(sh_degree=1, source_path='/media/pablo/Nuevo_vol/datasets/Eagle3/extracted_frames_planar/dataset', model_path='eagle', images='images', resolution=-1, white_background=False, data_device='cuda', eval=False)
+Namespace(sh_degree=1, source_path='C:\\Users\\pablo_7xoop1s\\dyngs\\Eagle2\\extracted_frames_planar\\dataset', model_path='eagle', images='images', resolution=-1, white_background=False, data_device='cuda', eval=False)

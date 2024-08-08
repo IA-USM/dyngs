@@ -15,3 +15,12 @@ For the rest:
 -- Extensions --
 - Optical flow loss
 - Temporal coherence loss
+
+Current problems:
+1. Accumulation: Each new stage keeps adding new gaussians
+2. Under reconstruction: Gaussians keep getting added to the environment instead of dynamic areas, ending up under reconstructed
+
+Proposed changes:
+- Motion segmentation, allow for densification only on those areas
+- Add only inside the bounds
+- Save the added gaussians separately

@@ -40,25 +40,35 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
     bounds =  (torch.tensor([-20, -8, -9]).cuda(), torch.tensor([20, 6, 17]).cuda())
 
     prev_gaussians = None
+
     if frame_idx > 1:
         prev_gaussians = GaussianModel(dataset.sh_degree)
         loaded_iter = searchForMaxIteration(os.path.join(dataset.model_path,  f"frame_{frame_idx-1}", "point_cloud"))
-        prev_gaussians.load_ply(os.path.join(dataset.model_path,  f"frame_{frame_idx-1}",
-                                        "point_cloud",
-                                        "iteration_" + str(loaded_iter),
-                                        "point_cloud.ply"))
+        
+        if frame_idx == 2:
+            prev_gaussians.load_ply(os.path.join(dataset.model_path,  f"frame_{frame_idx-1}",
+                                            "point_cloud",
+                                            "iteration_" + str(loaded_iter),
+                                            "point_cloud.ply"))
+        else:
+            prev_gaussians.load_ply(os.path.join(dataset.model_path,  f"frame_{frame_idx-1}",
+                                            "point_cloud",
+                                            "pre_iteration_" + str(loaded_iter),
+                                            "point_cloud.ply"))
         iters = opt.frame_iterations
-        opt.densify_from_iter = 0
-        opt.densification_interval = 500
+        opt.position_lr_init = opt.position_lr_final
+        opt.densification_interval = 300
         saving_iterations += [iters]
         testing_iterations += [iters]
-        opt.densify_grad_threshold = 0.0007
+        #opt.densify_grad_threshold = 0.0007
     else:
         iters = opt.iterations
 
     scene = Scene(dataset, gaussians, frame_idx=frame_idx, prev_gaussians=prev_gaussians, bounds = bounds)
 
     gaussians.training_setup(opt)
+    gaussians.init_count = scene.gaussians.get_xyz.shape[0]
+
     if checkpoint:
         (model_params, first_iter) = torch.load(checkpoint)
         gaussians.restore(model_params, opt)
@@ -141,6 +151,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 print(f"Max memory used: {mem:.2f} GB")
                 torchvision.utils.save_image(image, f"debug/frame_{frame_idx}.png")
                 scene.save(iteration)
+                scene.save(iteration, pre_densify=True)
 
             
             
@@ -150,13 +161,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations, checkpoi
                 gaussians.max_radii2D[visibility_filter] = torch.max(gaussians.max_radii2D[visibility_filter], radii[visibility_filter])
                 gaussians.add_densification_stats(viewspace_point_tensor, visibility_filter, image.shape[2], image.shape[1])
 
-                #if iteration == 1 and frame_idx != 1:
-                    # initial top k pruning
-                    #gaussians.top_k_prune(0.8)
-
                 if iteration > opt.densify_from_iter and iteration % opt.densification_interval == 0:
                     size_threshold = 20 if iteration > opt.opacity_reset_interval else None
-                    gaussians.densify_and_prune(opt.densify_grad_threshold, 0.01, scene.cameras_extent, size_threshold)
+                    #if frame_idx == 1:
+                    bounds = None
+                    gaussians.densify_and_prune(opt.densify_grad_threshold, opt.min_opacity, scene.cameras_extent, size_threshold, frame_idx>1, bounds)
                 
                 if iteration % opt.opacity_reset_interval == 0 or (dataset.white_background and iteration == opt.densify_from_iter):
                     gaussians.reset_opacity()

@@ -92,9 +92,13 @@ class Scene:
                 
                 self.gaussians.create_from_previous_gaussians(scene_info.point_cloud, prev_pcd, prev_gaussians, self.cameras_extent, bounds=bounds)
 
-    def save(self, iteration):
-        point_cloud_path = os.path.join(self.model_path, "frame_"+ str(self.frame_idx), "point_cloud/iteration_{}".format(iteration))
-        self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
+    def save(self, iteration, pre_densify=False):
+        if pre_densify:
+            point_cloud_path = os.path.join(self.model_path,  "frame_"+ str(self.frame_idx), "point_cloud/pre_iteration_{}".format(iteration))
+            self.gaussians.save_ply_pre_densify(os.path.join(point_cloud_path, "point_cloud.ply"))
+        else:
+            point_cloud_path = os.path.join(self.model_path, "frame_"+ str(self.frame_idx), "point_cloud/iteration_{}".format(iteration))
+            self.gaussians.save_ply(os.path.join(point_cloud_path, "point_cloud.ply"))
 
     def getTrainCameras(self, scale=1.0):
         return self.train_cameras[scale]
